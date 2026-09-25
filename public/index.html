@@ -104,7 +104,7 @@
     background: var(--surface-2); border: 1px solid var(--line);
     transition: transform .15s ease, box-shadow .15s ease, opacity .15s;
   }
-  .poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .poster img { position: relative; z-index: 1; width: 100%; height: 100%; object-fit: cover; display: block; }
   .poster .fallback {
     position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: flex-end; gap: 4px;
     padding: 10px; background: linear-gradient(160deg, #3a1a1e, #160d0f);
@@ -475,18 +475,59 @@
   const latestDrawAt = () => (state.draws.length ? state.draws[state.draws.length - 1].at : 0);
 
   function queuePosters() {
-    state.movies.filter((m) => m.poster === null && !posterTried.has(m.id)).forEach((m) => posterQueue.add(m.id));
+    state.movies.filter((m) => !m.poster && !posterTried.has(m.id)).forEach((m) => posterQueue.add(m.id));
     pumpPosters();
   }
+
+  // Look a poster up on Wikipedia straight from the phone's browser.
+  const normT = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  async function wikiPoster(title, year) {
+    const u = new URL('https://en.wikipedia.org/w/api.php');
+    Object.entries({
+      origin: '*', action: 'query', format: 'json', formatversion: '2', generator: 'search',
+      gsrsearch: `${title}${year ? ' ' + year : ''} film`, gsrlimit: '8',
+      prop: 'pageimages|description', piprop: 'thumbnail', pithumbsize: '500', pilicense: 'any',
+    }).forEach(([k, v]) => u.searchParams.set(k, v));
+    const r = await fetch(u);
+    if (!r.ok) return '';
+    const pages = ((await r.json()).query?.pages || []).sort((a, b) => a.index - b.index)
+      .filter((p) => p.thumbnail && /film/i.test(p.description || '') && !/series|franchise|soundtrack|character|actor|actress|director/i.test(p.description || ''))
+      .map((p) => ({
+        t: normT(p.title.replace(/\s*\((\d{4}\s+)?(\w+\s+)?film\)\s*$/i, '')),
+        y: Number(((p.description || '') + ' ' + p.title).match(/\b(19|20)\d{2}\b/)?.[0]) || null,
+        src: p.thumbnail.source,
+      }));
+    const near = (p) => !year || !p.y || Math.abs(p.y - year) <= 1;
+    const t = normT(title);
+    const hit = pages.find((p) => p.t === t && near(p))
+      || pages.find((p) => near(p) && (p.t.startsWith(t) || t.startsWith(p.t)));
+    return hit ? hit.src : '';
+  }
+
+  const setMovie = (movie) => { const i = state.movies.findIndex((m) => m.id === movie.id); if (i >= 0) state.movies[i] = movie; };
   let pumping = 0;
   function pumpPosters() {
     while (pumping < 3 && posterQueue.size) {
       const id = posterQueue.values().next().value;
       posterQueue.delete(id); posterTried.add(id); pumping++;
-      api('poster', { method: 'POST', body: { id } })
-        .then(({ movie }) => { const i = state.movies.findIndex((m) => m.id === id); if (i >= 0) state.movies[i] = movie; render(); })
-        .catch(() => {})
-        .finally(() => { pumping--; pumpPosters(); });
+      (async () => {
+        let movie = state.movies.find((m) => m.id === id);
+        if (!movie) return;
+        // 1) ask the server (uses TMDB if you added a key)
+        if (movie.poster === null) {
+          try { movie = (await api('poster', { method: 'POST', body: { id } })).movie; setMovie(movie); } catch {}
+        }
+        // 2) still nothing? try Wikipedia from this browser and save what we find
+        if (!movie.poster) {
+          const src = await wikiPoster(movie.title, movie.year).catch(() => '');
+          if (src) {
+            try { movie = (await api('poster', { method: 'POST', body: { id, poster: src } })).movie; }
+            catch { movie = { ...movie, poster: src }; }
+            setMovie(movie);
+          }
+        }
+        render();
+      })().finally(() => { pumping--; pumpPosters(); });
     }
   }
 
