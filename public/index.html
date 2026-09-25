@@ -117,6 +117,7 @@
     background-size: 200% 100%; animation: shimmer 1.4s infinite linear;
   }
   @keyframes shimmer { from { background-position: 150% 0; } to { background-position: -50% 0; } }
+  .pslot { display: block; }
   .tile .cap { font-size: 12px; line-height: 1.25; color: var(--dim); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .tile .cap b { color: var(--bone); font-weight: 500; }
 
@@ -531,6 +532,36 @@
     }
   }
 
+  // ---------- stable DOM (so posters don't flash on every update) ----------
+  const tileCache = new Map();   // key -> { html, el }
+  const posterCache = new Map(); // movie id -> { html, el }
+  function posterEl(m) {
+    const html = posterHTML(m);
+    let c = posterCache.get(m.id);
+    if (!c || c.html !== html) {
+      const t = document.createElement('template'); t.innerHTML = html.trim();
+      c = { html, el: t.content.firstElementChild }; posterCache.set(m.id, c);
+    }
+    return c.el;
+  }
+  function tileEl(key, html, m) {
+    let c = tileCache.get(key);
+    const pe = m ? posterEl(m) : null;
+    if (!c || c.html !== html) {
+      const t = document.createElement('template'); t.innerHTML = html.trim();
+      c = { html, el: t.content.firstElementChild }; tileCache.set(key, c);
+    }
+    if (pe) {
+      const slot = c.el.querySelector('[data-poster]');
+      if (slot && slot.firstChild !== pe) slot.replaceChildren(pe);
+    }
+    return c.el;
+  }
+  function setHTML(el, html) {
+    if (el.__html === html) return;
+    el.__html = html; el.innerHTML = html;
+  }
+
   // ---------- render ----------
   function render() {
     $('whoName').textContent = me || 'nobody yet';
@@ -560,38 +591,46 @@
     const f = filterText.trim().toLowerCase();
     const list = state.movies.filter((m) => !f || m.title.toLowerCase().includes(f) || String(m.year).includes(f));
     const full = selected.length >= PICKS;
-    let html = list.map((m) => {
+    const tiles = list.map((m) => {
       const idx = selected.indexOf(m.id);
       const sel = idx >= 0;
       const others = whoPicked(m.id);
-      if (editMode) {
-        return `<div class="tile" data-id="${m.id}">
-          ${posterHTML(m)}
-          <div class="edit-actions">
-            <button type="button" data-act="poster" data-id="${m.id}">Poster</button>
-            <button type="button" class="danger" data-act="remove" data-id="${m.id}">Remove</button>
-          </div>
-          <div class="cap"><b>${esc(m.title)}</b> ${m.year || ''}</div>
-        </div>`;
-      }
-      return `<button type="button" class="tile${sel ? ' selected' : ''}${full && !sel ? ' dimmed' : ''}" data-id="${m.id}" aria-pressed="${sel}" aria-label="${esc(m.title)} ${m.year || ''}">
-        ${sel ? `<span class="badge">${idx + 1}</span>` : ''}
-        ${posterHTML(m)}
-        ${others.length ? `<span class="others">+ ${esc(others.join(', '))}</span>` : ''}
-        <span class="cap"><b>${esc(m.title)}</b> ${m.year || ''}</span>
-      </button>`;
-    }).join('');
-    html += `<button type="button" class="tile add-tile" id="addTile">
+      const html = editMode
+        ? `<div class="tile" data-id="${m.id}">
+            <span class="pslot" data-poster></span>
+            <div class="edit-actions">
+              <button type="button" data-act="poster" data-id="${m.id}">Poster</button>
+              <button type="button" class="danger" data-act="remove" data-id="${m.id}">Remove</button>
+            </div>
+            <div class="cap"><b>${esc(m.title)}</b> ${m.year || ''}</div>
+          </div>`
+        : `<button type="button" class="tile${sel ? ' selected' : ''}${full && !sel ? ' dimmed' : ''}" data-id="${m.id}" aria-pressed="${sel}" aria-label="${esc(m.title)} ${m.year || ''}">
+            ${sel ? `<span class="badge">${idx + 1}</span>` : ''}
+            <span class="pslot" data-poster></span>
+            ${others.length ? `<span class="others">+ ${esc(others.join(', '))}</span>` : ''}
+            <span class="cap"><b>${esc(m.title)}</b> ${m.year || ''}</span>
+          </button>`;
+      return tileEl((editMode ? 'e:' : 'p:') + m.id, html, m);
+    });
+    tiles.push(tileEl('add', `<button type="button" class="tile add-tile" id="addTile">
       <div class="poster"><div><span class="plus">+</span>Add a movie${f ? `<br><b>“${esc(filterText.trim())}”</b>` : ''}</div></div>
-    </button>`;
-    $('grid').innerHTML = html;
+    </button>`));
+    const grid = $('grid');
+    const same = grid.children.length === tiles.length && tiles.every((t, i) => grid.children[i] === t);
+    if (!same) grid.replaceChildren(...tiles);
 
-    // dock
+    // dock: only touch a slot when its movie or poster changes
     const movies = byId();
-    $('slots').innerHTML = Array.from({ length: PICKS }, (_, i) => {
+    const slots = $('slots');
+    if (slots.children.length !== PICKS) slots.innerHTML = '<div class="slot"></div>'.repeat(PICKS);
+    [...slots.children].forEach((slot, i) => {
       const m = movies[selected[i]];
-      return `<div class="slot${m ? ' filled' : ''}">${m && m.poster ? `<img src="${esc(m.poster)}" alt="" referrerpolicy="no-referrer">` : ''}</div>`;
-    }).join('');
+      const src = m && m.poster ? m.poster : '';
+      slot.classList.toggle('filled', !!m);
+      if (slot.dataset.src === src) return;
+      slot.dataset.src = src;
+      slot.innerHTML = src ? `<img src="${esc(src)}" alt="" referrerpolicy="no-referrer">` : '';
+    });
     $('dockStatus').textContent = `${selected.length}/${PICKS}`;
     const btn = $('submitBtn');
     btn.disabled = selected.length !== PICKS || (mine && !dirty);
@@ -616,14 +655,14 @@
 
     // little ticket stubs peeking out of the hat
     const stubs = Math.min(tickets.length, 14);
-    $('hatTickets').innerHTML = Array.from({ length: stubs }, (_, i) => {
+    setHTML($('hatTickets'), Array.from({ length: stubs }, (_, i) => {
       const x = 52 + (i * 41) % 56, rot = ((i * 37) % 40) - 20, y = 14 + (i % 3) * 4;
       return `<rect x="${x}" y="${y}" width="10" height="22" rx="1" fill="#efe6d6" opacity=".9" transform="rotate(${rot} ${x + 5} ${y + 22})"/>`;
-    }).join('');
+    }).join(''));
 
     // drawn
     $('drawnWrap').hidden = !state.draws.length;
-    $('drawnList').innerHTML = state.draws.map((d, i) => {
+    setHTML($('drawnList'), state.draws.map((d, i) => {
       const m = movies[d.id];
       const pickers = state.picks.filter((p) => p.ids.includes(d.id)).map((p) => p.name);
       return `<div class="drawn-item">
@@ -632,17 +671,17 @@
         <div><div class="t">${esc(m ? m.title : 'Removed movie')}</div>
         <div class="m">${m && m.year ? m.year + ' · ' : ''}picked by ${esc(pickers.join(', ') || '—')}</div></div>
       </div>`;
-    }).join('');
+    }).join(''));
 
     // people
     const drawnIds = new Set(state.draws.map((d) => d.id));
     $('peopleCount').textContent = state.picks.length ? `${state.picks.length} ${state.picks.length === 1 ? 'person' : 'people'}` : '';
-    $('people').innerHTML = state.picks.length ? state.picks.map((p) => `
+    setHTML($('people'), state.picks.length ? state.picks.map((p) => `
       <div class="person">
         <div class="person-head"><b>${esc(p.name)}</b><button type="button" data-remove-person="${esc(p.name)}">Take out</button></div>
         <div class="tickets">${p.ids.map((id) => `<div class="ticket${drawnIds.has(id) ? ' out' : ''}">${posterHTML(movies[id])}</div>`).join('')}</div>
       </div>`).join('')
-      : `<div class="empty">Nobody's picked yet. Send everyone this link and have them pick 5.</div>`;
+      : `<div class="empty">Nobody's picked yet. Send everyone this link and have them pick 5.</div>`);
   }
 
   // ---------- reveal animation ----------
