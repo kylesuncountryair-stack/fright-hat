@@ -3,7 +3,7 @@
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 
-const routes = ['state', 'movies', 'poster', 'search', 'picks', 'draw', 'reset'];
+const routes = ['state', 'movies', 'poster', 'posters', 'search', 'picks', 'draw', 'reset'];
 const handlers = Object.fromEntries(
   await Promise.all(routes.map(async (r) => [r, (await import(`./api/${r}.js`)).default]))
 );

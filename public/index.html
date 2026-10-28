@@ -118,21 +118,6 @@
   }
   @keyframes shimmer { from { background-position: 150% 0; } to { background-position: -50% 0; } }
   .pslot { display: block; }
-  .series-tile .stack { position: relative; display: block; padding: 0 8px 8px 0; }
-  .series-tile .stack::before, .series-tile .stack::after {
-    content: ''; position: absolute; border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface-2);
-  }
-  .series-tile .stack::after { inset: 8px 0 0 8px; }
-  .series-tile .stack::before { inset: 4px 4px 4px 4px; background: #33201f; }
-  .series-tile .stack .pslot { position: relative; z-index: 1; box-shadow: 4px 4px 12px rgba(0,0,0,.45); border-radius: var(--radius); }
-  .series-tile.has-picks .stack .poster { box-shadow: 0 0 0 3px var(--blood); }
-  .series-tile .cap .count { display: block; font-family: var(--mono); font-size: 11px; color: var(--candle); }
-  .series-tile .series-badge { top: -6px; right: 2px; }
-  .series-sheet { max-width: 640px; }
-  .series-sheet .grid { margin-top: 4px; }
-  .series-sheet .add-bar { align-items: center; }
-  .series-sheet .add-bar .status { flex: 1; font-family: var(--mono); font-size: 13px; color: var(--dim); }
-  .series-sheet .add-bar .primary { flex: 0 0 auto; padding-inline: 28px; }
   .tile .cap { font-size: 12px; line-height: 1.25; color: var(--dim); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .tile .cap b { color: var(--bone); font-weight: 500; }
 
@@ -264,6 +249,22 @@
     background: var(--ground); border-top: 1px solid var(--line);
   }
   .add-bar .primary { flex: 1; }
+  .poster-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  @media (min-width: 520px) { .poster-options { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+  .poster-option { position: relative; background: none; border: 0; padding: 0; border-radius: var(--radius); }
+  .poster-option .poster { display: block; }
+  .poster-option.on .poster { box-shadow: 0 0 0 3px var(--blood), 0 6px 18px rgba(196, 42, 51, .35); }
+  .poster-option.on::after {
+    content: '✓'; position: absolute; top: 6px; right: 6px; z-index: 2; width: 26px; height: 26px; border-radius: 50%;
+    display: grid; place-items: center; background: var(--blood); color: var(--bone); font-weight: 700; font-size: 14px;
+  }
+  .poster-option .current {
+    position: absolute; left: 6px; bottom: 6px; z-index: 2; font-size: 10.5px; font-weight: 700; letter-spacing: .04em;
+    padding: 2px 6px; border-radius: 3px; background: rgba(19, 12, 13, .85); color: var(--candle); text-transform: uppercase;
+  }
+  #posterForm .ghost { flex-shrink: 0; }
+  .add-bar .primary:only-child { flex: 1; }
+
   .hint { font-size: 12.5px; color: var(--dim); margin-top: 10px; }
   .field-label { display: block; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); margin: 14px 0 6px; }
 
@@ -392,33 +393,23 @@
   </div>
 </div>
 
-<!-- series sheet -->
-<div class="scrim" id="seriesSheet" hidden>
-  <div class="sheet series-sheet" role="dialog" aria-modal="true" aria-labelledby="seriesTitle">
-    <button class="sheet-close" id="seriesClose" type="button">Close</button>
-    <h3 id="seriesTitle"></h3>
-    <p id="seriesSub"></p>
-    <div class="grid" id="seriesGrid"></div>
-    <div class="add-bar">
-      <span class="status" id="seriesStatus"></span>
-      <button class="primary" id="seriesDone" type="button">Done</button>
-    </div>
-  </div>
-</div>
-
 <!-- poster fix sheet -->
 <div class="scrim" id="posterSheet" hidden>
   <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="posterTitle">
     <button class="sheet-close" id="posterClose" type="button">Close</button>
-    <h3 id="posterTitle">Fix poster</h3>
+    <h3 id="posterTitle">Choose a poster</h3>
     <p id="posterFor"></p>
-    <button class="ghost" id="posterRetry" type="button">Search for a poster again</button>
-    <label class="field-label" for="posterUrl">Or paste an image link</label>
+    <div class="poster-options" id="posterOptions"></div>
+    <div class="hint" id="posterStatus"></div>
+    <label class="field-label" for="posterUrl">Not here? Paste an image link</label>
     <form id="posterForm">
       <input id="posterUrl" type="url" placeholder="https://…" autocomplete="off">
-      <button class="primary" type="submit">Save</button>
+      <button class="ghost" type="submit">Use link</button>
     </form>
     <p class="hint">Tip: long-press a poster image on any site, choose "Copy Image Address", and paste it here.</p>
+    <div class="add-bar">
+      <button class="primary" id="posterSave" type="button" disabled>Save poster</button>
+    </div>
   </div>
 </div>
 
@@ -641,35 +632,14 @@
     const f = filterText.trim().toLowerCase();
     const list = state.movies.filter((m) => !f || m.title.toLowerCase().includes(f) || String(m.year).includes(f));
     const full = selected.length >= PICKS;
-    const collapse = !f && !editMode;
-    const members = seriesMembers();
-    const seen = new Set();
-    const entries = [];
-    for (const m of list) {
-      const sname = collapse && m.series && members.get(m.series).length > 1 ? m.series : null;
-      if (!sname) { entries.push(m); continue; }
-      if (seen.has(sname)) continue;
-      seen.add(sname);
-      entries.push({ seriesTile: sname });
-    }
-    const tiles = entries.map((m) => {
-      if (m.seriesTile) return seriesTileEl(m.seriesTile, members.get(m.seriesTile));
-      return movieTileEl(m, full);
-    });
+    const tiles = list.map((m) => movieTileEl(m, full));
     tiles.push(tileEl('add', `<button type="button" class="tile add-tile" id="addTile">
       <div class="poster"><div><span class="plus">+</span>Add a movie${f ? `<br><b>“${esc(filterText.trim())}”</b>` : ''}</div></div>
     </button>`));
     const grid = $('grid');
     const same = grid.children.length === tiles.length && tiles.every((t, i) => grid.children[i] === t);
     if (!same) grid.replaceChildren(...tiles);
-    if (!$('seriesSheet').hidden) renderSeriesSheet();
     renderDock(mine);
-  }
-
-  function seriesMembers() {
-    const map = new Map();
-    for (const m of state.movies) if (m.series) (map.get(m.series) || map.set(m.series, []).get(m.series)).push(m);
-    return map;
   }
 
   function movieTileEl(m, full) {
@@ -692,18 +662,6 @@
           </button>`;
       return tileEl((editMode ? 'e:' : 'p:') + m.id, html, m);
     }
-  }
-
-  function seriesTileEl(name, films) {
-    const cover = films.find((m) => m.poster) || films[0];
-    const mineIn = films.filter((m) => selected.includes(m.id)).length;
-    const html = `<button type="button" class="tile series-tile${mineIn ? ' has-picks' : ''}" data-series="${esc(name)}" aria-label="${esc(name)}, ${films.length} films">
-        ${mineIn ? `<span class="badge series-badge">${mineIn}</span>` : ''}
-        <span class="stack"><span class="pslot" data-poster></span></span>
-        <span class="cap"><b>${esc(name)}</b> <span class="count">${films.length} films</span></span>
-      </button>`;
-    // series tiles show the cover poster as a copy so the film's own tile keeps its element
-    return tileEl('s:' + name, html, { ...cover, id: 'cover:' + name });
   }
 
   function renderDock(mine) {
@@ -876,8 +834,6 @@
       }
       return;
     }
-    const st = e.target.closest('[data-series]');
-    if (st) return openSeries(st.dataset.series);
     const tile = e.target.closest('.tile[data-id]');
     if (!tile || editMode) return;
     toggleMovie(tile.dataset.id);
@@ -892,35 +848,6 @@
     dirty = true;
     renderPick();
   }
-
-  // ---------- series panel ----------
-  let openSeriesName = null;
-  function openSeries(name) {
-    openSeriesName = name;
-    $('seriesSheet').hidden = false;
-    renderSeriesSheet();
-    $('seriesSheet').querySelector('.sheet').scrollTop = 0;
-  }
-  function renderSeriesSheet() {
-    const films = seriesMembers().get(openSeriesName) || [];
-    if (!films.length) { $('seriesSheet').hidden = true; return; }
-    const full = selected.length >= PICKS;
-    $('seriesTitle').textContent = openSeriesName;
-    const mineIn = films.filter((m) => selected.includes(m.id)).length;
-    $('seriesSub').textContent = `${films.length} films, in release order. Tap any to pick it.`;
-    const tiles = films.map((m) => movieTileEl(m, full));
-    const grid = $('seriesGrid');
-    const same = grid.children.length === tiles.length && tiles.every((t, i) => grid.children[i] === t);
-    if (!same) grid.replaceChildren(...tiles);
-    $('seriesStatus').textContent = `${selected.length}/${PICKS} picked${mineIn ? ` · ${mineIn} from this series` : ''}`;
-  }
-  const closeSeries = () => { $('seriesSheet').hidden = true; openSeriesName = null; renderPick(); };
-  $('seriesClose').onclick = closeSeries;
-  $('seriesDone').onclick = closeSeries;
-  $('seriesGrid').onclick = (e) => {
-    const tile = e.target.closest('.tile[data-id]');
-    if (tile) toggleMovie(tile.dataset.id);
-  };
 
   $('submitBtn').onclick = async () => {
     if (!me) return openName();
@@ -1044,7 +971,7 @@
   }
   $('addChosen').onclick = () => {
     const list = results.filter((r) => chosen.has(r.key)).map(({ title, year, poster }) => ({ title, year, poster: poster || null }));
-    // Several films that share a name (Leprechaun, Leprechaun 2, Leprechaun 4: In Space…) become a series
+    // Films that share a name (Leprechaun, Leprechaun 2, Leprechaun 4: In Space…) are tagged as a series so they sort together in release order
     if (list.length > 1) {
       const base = list.map((m) => m.title).sort((a, b) => a.length - b.length)[0];
       const nb = normT(base);
@@ -1059,30 +986,78 @@
     addMovies([m && m[1] ? { title: m[1], year: Number(m[2]) } : { title: q }]);
   };
 
-  // ---------- poster fix ----------
+  // ---------- choose a poster ----------
+  let posterChoices = [];   // urls
+  let posterPick = null;    // url tapped
+  let posterRun = 0;
   function openPosterFix(id) {
     const m = byId()[id]; if (!m) return;
     posterFixId = id;
-    $('posterFor').textContent = `${m.title}${m.year ? ' (' + m.year + ')' : ''}`;
+    $('posterFor').textContent = `${m.title}${m.year ? ' (' + m.year + ')' : ''}. Tap the one you want, then save.`;
     $('posterUrl').value = '';
+    posterChoices = m.poster ? [m.poster] : [];
+    posterPick = m.poster || null;
     $('posterSheet').hidden = false;
+    $('posterSheet').querySelector('.sheet').scrollTop = 0;
+    renderPosterChoices('Finding more posters…');
+    loadPosterChoices(m);
   }
-  $('posterClose').onclick = () => ($('posterSheet').hidden = true);
-  async function savePoster(body) {
+  function addChoices(urls) {
+    for (const u of urls) if (u && !posterChoices.includes(u)) posterChoices.push(u);
+  }
+  function renderPosterChoices(status = '') {
+    const m = byId()[posterFixId];
+    $('posterOptions').innerHTML = posterChoices.map((u) => `
+      <button type="button" class="poster-option${u === posterPick ? ' on' : ''}" data-url="${esc(u)}" aria-pressed="${u === posterPick}">
+        <span class="poster"><img src="${esc(u)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.closest('.poster-option').remove()"></span>
+        ${m && u === m.poster ? '<span class="current">Current</span>' : ''}
+      </button>`).join('');
+    $('posterStatus').textContent = status || (posterChoices.length ? '' : 'No posters found. Paste a link below.');
+    $('posterSave').disabled = !posterPick || (m && posterPick === m.poster);
+  }
+  async function loadPosterChoices(m) {
+    const run = ++posterRun;
+    const near = (r) => !m.year || !r.year || Math.abs(r.year - m.year) <= 1;
+    const t = normT(m.title);
+    const fits = (r) => near(r) && (normT(r.title) === t || normT(r.title).startsWith(t) || t.startsWith(normT(r.title)));
+    let pending = 2;
+    const done = (urls) => {
+      if (run !== posterRun) return;
+      addChoices(urls); pending--;
+      renderPosterChoices(pending ? 'Finding more posters…' : '');
+    };
+    wikiSearch(m.title, m.year, 10).then((rs) => done(rs.filter((r) => r.poster && fits(r)).map((r) => r.poster)), () => done([]));
+    const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 9000);
+    fetch(`/api/posters?title=${encodeURIComponent(m.title)}&year=${m.year || ''}`, { signal: ctrl.signal })
+      .then((r) => (r.ok ? r.json() : { options: [] }))
+      .then((d) => done((d.options || []).map((o) => o.url)), () => done([]))
+      .finally(() => clearTimeout(timer));
+  }
+  $('posterOptions').onclick = (e) => {
+    const b = e.target.closest('[data-url]'); if (!b) return;
+    posterPick = b.dataset.url;
+    renderPosterChoices($('posterStatus').textContent);
+  };
+  $('posterClose').onclick = () => { posterRun++; $('posterSheet').hidden = true; };
+  async function savePoster(url) {
+    const btn = $('posterSave'); btn.disabled = true; btn.textContent = 'Saving…';
     try {
-      const { movie } = await api('poster', { method: 'POST', body: { id: posterFixId, ...body } });
+      const { movie } = await api('poster', { method: 'POST', body: { id: posterFixId, poster: url } });
       const i = state.movies.findIndex((m) => m.id === movie.id); if (i >= 0) state.movies[i] = movie;
-      $('posterSheet').hidden = true;
-      toast(movie.poster ? 'Poster updated' : 'No poster found. Try pasting a link.');
+      posterRun++; $('posterSheet').hidden = true;
+      toast('Poster updated');
       render();
     } catch (e) { toast(e.message); }
+    btn.textContent = 'Save poster';
   }
-  $('posterRetry').onclick = () => savePoster({ retry: true });
+  $('posterSave').onclick = () => { if (posterPick) savePoster(posterPick); };
   $('posterForm').onsubmit = (e) => {
     e.preventDefault();
     const url = $('posterUrl').value.trim();
     if (!/^https:\/\//.test(url)) return toast('Paste a link that starts with https://');
-    savePoster({ poster: url });
+    addChoices([url]); posterPick = url;
+    renderPosterChoices();
+    $('posterUrl').value = '';
   };
 
   // ---------- hat ----------
@@ -1121,7 +1096,7 @@
 
   // close sheets on scrim tap
   document.querySelectorAll('.scrim').forEach((s) => s.addEventListener('click', (e) => {
-    if (e.target === s && !(s.id === 'nameSheet' && !me)) { if (s.id === 'seriesSheet') closeSeries(); else s.hidden = true; }
+    if (e.target === s && !(s.id === 'nameSheet' && !me)) s.hidden = true;
   }));
 
   // ---------- boot ----------
