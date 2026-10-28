@@ -5,7 +5,8 @@ const clean = (m) => {
   const title = String(m?.title || '').trim().slice(0, 120);
   const year = Number(m?.year) || null;
   const poster = /^https:\/\//.test(m?.poster || '') ? m.poster : null;
-  return title ? { id: slug(title, year), title, year, poster } : null;
+  const series = String(m?.series || '').trim().slice(0, 60) || null;
+  return title ? { id: slug(title, year), title, year, poster, series } : null;
 };
 
 export default async function handler(req, res) {

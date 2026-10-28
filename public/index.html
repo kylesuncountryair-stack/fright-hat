@@ -118,6 +118,21 @@
   }
   @keyframes shimmer { from { background-position: 150% 0; } to { background-position: -50% 0; } }
   .pslot { display: block; }
+  .series-tile .stack { position: relative; display: block; padding: 0 8px 8px 0; }
+  .series-tile .stack::before, .series-tile .stack::after {
+    content: ''; position: absolute; border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface-2);
+  }
+  .series-tile .stack::after { inset: 8px 0 0 8px; }
+  .series-tile .stack::before { inset: 4px 4px 4px 4px; background: #33201f; }
+  .series-tile .stack .pslot { position: relative; z-index: 1; box-shadow: 4px 4px 12px rgba(0,0,0,.45); border-radius: var(--radius); }
+  .series-tile.has-picks .stack .poster { box-shadow: 0 0 0 3px var(--blood); }
+  .series-tile .cap .count { display: block; font-family: var(--mono); font-size: 11px; color: var(--candle); }
+  .series-tile .series-badge { top: -6px; right: 2px; }
+  .series-sheet { max-width: 640px; }
+  .series-sheet .grid { margin-top: 4px; }
+  .series-sheet .add-bar { align-items: center; }
+  .series-sheet .add-bar .status { flex: 1; font-family: var(--mono); font-size: 13px; color: var(--dim); }
+  .series-sheet .add-bar .primary { flex: 0 0 auto; padding-inline: 28px; }
   .tile .cap { font-size: 12px; line-height: 1.25; color: var(--dim); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .tile .cap b { color: var(--bone); font-weight: 500; }
 
@@ -130,7 +145,7 @@
     background: var(--blood); color: var(--bone); box-shadow: 0 2px 8px rgba(0,0,0,.5);
   }
   .others {
-    position: absolute; left: 6px; bottom: 6px; z-index: 2; max-width: calc(100% - 12px);
+    position: absolute; left: 6px; top: 6px; z-index: 2; max-width: calc(100% - 44px);
     font-size: 10.5px; font-weight: 700; letter-spacing: .04em; padding: 2px 6px; border-radius: 3px;
     background: rgba(19, 12, 13, .85); color: var(--candle); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
@@ -377,6 +392,20 @@
   </div>
 </div>
 
+<!-- series sheet -->
+<div class="scrim" id="seriesSheet" hidden>
+  <div class="sheet series-sheet" role="dialog" aria-modal="true" aria-labelledby="seriesTitle">
+    <button class="sheet-close" id="seriesClose" type="button">Close</button>
+    <h3 id="seriesTitle"></h3>
+    <p id="seriesSub"></p>
+    <div class="grid" id="seriesGrid"></div>
+    <div class="add-bar">
+      <span class="status" id="seriesStatus"></span>
+      <button class="primary" id="seriesDone" type="button">Done</button>
+    </div>
+  </div>
+</div>
+
 <!-- poster fix sheet -->
 <div class="scrim" id="posterSheet" hidden>
   <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="posterTitle">
@@ -612,10 +641,41 @@
     const f = filterText.trim().toLowerCase();
     const list = state.movies.filter((m) => !f || m.title.toLowerCase().includes(f) || String(m.year).includes(f));
     const full = selected.length >= PICKS;
-    const tiles = list.map((m) => {
+    const collapse = !f && !editMode;
+    const members = seriesMembers();
+    const seen = new Set();
+    const entries = [];
+    for (const m of list) {
+      const sname = collapse && m.series && members.get(m.series).length > 1 ? m.series : null;
+      if (!sname) { entries.push(m); continue; }
+      if (seen.has(sname)) continue;
+      seen.add(sname);
+      entries.push({ seriesTile: sname });
+    }
+    const tiles = entries.map((m) => {
+      if (m.seriesTile) return seriesTileEl(m.seriesTile, members.get(m.seriesTile));
+      return movieTileEl(m, full);
+    });
+    tiles.push(tileEl('add', `<button type="button" class="tile add-tile" id="addTile">
+      <div class="poster"><div><span class="plus">+</span>Add a movie${f ? `<br><b>“${esc(filterText.trim())}”</b>` : ''}</div></div>
+    </button>`));
+    const grid = $('grid');
+    const same = grid.children.length === tiles.length && tiles.every((t, i) => grid.children[i] === t);
+    if (!same) grid.replaceChildren(...tiles);
+    if (!$('seriesSheet').hidden) renderSeriesSheet();
+    renderDock(mine);
+  }
+
+  function seriesMembers() {
+    const map = new Map();
+    for (const m of state.movies) if (m.series) (map.get(m.series) || map.set(m.series, []).get(m.series)).push(m);
+    return map;
+  }
+
+  function movieTileEl(m, full) {
+    {
       const idx = selected.indexOf(m.id);
       const sel = idx >= 0;
-      const others = whoPicked(m.id);
       const html = editMode
         ? `<div class="tile" data-id="${m.id}">
             <span class="pslot" data-poster></span>
@@ -628,18 +688,25 @@
         : `<button type="button" class="tile${sel ? ' selected' : ''}${full && !sel ? ' dimmed' : ''}" data-id="${m.id}" aria-pressed="${sel}" aria-label="${esc(m.title)} ${m.year || ''}">
             ${sel ? `<span class="badge">${idx + 1}</span>` : ''}
             <span class="pslot" data-poster></span>
-            ${others.length ? `<span class="others">+ ${esc(others.join(', '))}</span>` : ''}
             <span class="cap"><b>${esc(m.title)}</b> ${m.year || ''}</span>
           </button>`;
       return tileEl((editMode ? 'e:' : 'p:') + m.id, html, m);
-    });
-    tiles.push(tileEl('add', `<button type="button" class="tile add-tile" id="addTile">
-      <div class="poster"><div><span class="plus">+</span>Add a movie${f ? `<br><b>“${esc(filterText.trim())}”</b>` : ''}</div></div>
-    </button>`));
-    const grid = $('grid');
-    const same = grid.children.length === tiles.length && tiles.every((t, i) => grid.children[i] === t);
-    if (!same) grid.replaceChildren(...tiles);
+    }
+  }
 
+  function seriesTileEl(name, films) {
+    const cover = films.find((m) => m.poster) || films[0];
+    const mineIn = films.filter((m) => selected.includes(m.id)).length;
+    const html = `<button type="button" class="tile series-tile${mineIn ? ' has-picks' : ''}" data-series="${esc(name)}" aria-label="${esc(name)}, ${films.length} films">
+        ${mineIn ? `<span class="badge series-badge">${mineIn}</span>` : ''}
+        <span class="stack"><span class="pslot" data-poster></span></span>
+        <span class="cap"><b>${esc(name)}</b> <span class="count">${films.length} films</span></span>
+      </button>`;
+    // series tiles show the cover poster as a copy so the film's own tile keeps its element
+    return tileEl('s:' + name, html, { ...cover, id: 'cover:' + name });
+  }
+
+  function renderDock(mine) {
     // dock: only touch a slot when its movie or poster changes
     const movies = byId();
     const slots = $('slots');
@@ -809,16 +876,50 @@
       }
       return;
     }
+    const st = e.target.closest('[data-series]');
+    if (st) return openSeries(st.dataset.series);
     const tile = e.target.closest('.tile[data-id]');
     if (!tile || editMode) return;
+    toggleMovie(tile.dataset.id);
+  };
+
+  function toggleMovie(id) {
     if (!me) return openName();
-    const id = tile.dataset.id;
     const i = selected.indexOf(id);
     if (i >= 0) selected.splice(i, 1);
     else if (selected.length < PICKS) selected.push(id);
     else { toast(`You already have ${PICKS}. Tap one to drop it first.`); return; }
     dirty = true;
     renderPick();
+  }
+
+  // ---------- series panel ----------
+  let openSeriesName = null;
+  function openSeries(name) {
+    openSeriesName = name;
+    $('seriesSheet').hidden = false;
+    renderSeriesSheet();
+    $('seriesSheet').querySelector('.sheet').scrollTop = 0;
+  }
+  function renderSeriesSheet() {
+    const films = seriesMembers().get(openSeriesName) || [];
+    if (!films.length) { $('seriesSheet').hidden = true; return; }
+    const full = selected.length >= PICKS;
+    $('seriesTitle').textContent = openSeriesName;
+    const mineIn = films.filter((m) => selected.includes(m.id)).length;
+    $('seriesSub').textContent = `${films.length} films, in release order. Tap any to pick it.`;
+    const tiles = films.map((m) => movieTileEl(m, full));
+    const grid = $('seriesGrid');
+    const same = grid.children.length === tiles.length && tiles.every((t, i) => grid.children[i] === t);
+    if (!same) grid.replaceChildren(...tiles);
+    $('seriesStatus').textContent = `${selected.length}/${PICKS} picked${mineIn ? ` · ${mineIn} from this series` : ''}`;
+  }
+  const closeSeries = () => { $('seriesSheet').hidden = true; openSeriesName = null; renderPick(); };
+  $('seriesClose').onclick = closeSeries;
+  $('seriesDone').onclick = closeSeries;
+  $('seriesGrid').onclick = (e) => {
+    const tile = e.target.closest('.tile[data-id]');
+    if (tile) toggleMovie(tile.dataset.id);
   };
 
   $('submitBtn').onclick = async () => {
@@ -943,6 +1044,13 @@
   }
   $('addChosen').onclick = () => {
     const list = results.filter((r) => chosen.has(r.key)).map(({ title, year, poster }) => ({ title, year, poster: poster || null }));
+    // Several films that share a name (Leprechaun, Leprechaun 2, Leprechaun 4: In Space…) become a series
+    if (list.length > 1) {
+      const base = list.map((m) => m.title).sort((a, b) => a.length - b.length)[0];
+      const nb = normT(base);
+      const existing = state.movies.find((m) => m.series && normT(m.series) === nb);
+      if (nb.length >= 3 && list.every((m) => normT(m.title).startsWith(nb))) list.forEach((m) => (m.series = existing ? existing.series : base));
+    }
     if (list.length) addMovies(list);
   };
   $('manualAdd').onclick = () => {
@@ -1013,7 +1121,7 @@
 
   // close sheets on scrim tap
   document.querySelectorAll('.scrim').forEach((s) => s.addEventListener('click', (e) => {
-    if (e.target === s && !(s.id === 'nameSheet' && !me)) s.hidden = true;
+    if (e.target === s && !(s.id === 'nameSheet' && !me)) { if (s.id === 'seriesSheet') closeSeries(); else s.hidden = true; }
   }));
 
   // ---------- boot ----------
